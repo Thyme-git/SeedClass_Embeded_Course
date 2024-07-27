@@ -1,0 +1,6 @@
+.devcontainer/
+.vscode/
+basic_math/
+build/
+managed_components/
+tutorial/
