@@ -9,8 +9,8 @@
 // # define SAMPLE_RATE 44100
 // # define FLASH_RATE 12
 // # define SAMPLE_STEP ((int)(SAMPLE_RATE / (FLASH_RATE * FFT_POINTS)))
-# define SAMPLE_STEP 1
-# define FFT_POINTS 16
+# define SAMPLE_STEP 8
+# define FFT_POINTS 32
 
 // # define item_size_upto (240 * 6) // defined in  bt_app_core.c:127
 // # define queue_max_len (item_size_upto * 8)

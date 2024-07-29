@@ -1,5 +1,7 @@
+      
 # include "freertos/FreeRTOS.h"
 # include "freertos/task.h"
+#include "freertos/semphr.h"
 # include "display.h"
 # include "esp_log.h"
 # include "fft.h"
@@ -130,7 +132,7 @@ void led_strip_update()
 # define RESOL_H 8
 # define RESOL_W 16
 static uint32_t screen_indices_map[RESOL_H][RESOL_W];
-static float hight2saturation[RESOL_H];
+// static float hight2saturation[RESOL_H];
 void init_screen_indices_map() {
 	for (int i = 0; i < RESOL_H; i++) {
 		for (int j = 0; j < RESOL_W; j++) {
@@ -139,36 +141,24 @@ void init_screen_indices_map() {
 		}
 	}
 
-	for (int i = 0; i < RESOL_H; i++) {
-		hight2saturation[i] = i+1 / RESOL_H;
-	}
-}
-
-
-void map_test() { // map test
-	static int index = 0;
-	for (int i = 0; i < RESOL_H; i++) {
-		for (int j = 0; j < RESOL_W; j++) {
-			if (i * RESOL_W + j == index) display_buffer[screen_indices_map[i][j]] = 0xf00000;
-			else display_buffer[screen_indices_map[i][j]] = 0x000000;
-		}
-	}
-	index = (index + 1) % (RESOL_H * RESOL_W);
+	// for (int i = 0; i < RESOL_H; i++) {
+	// 	hight2saturation[i] = i+1 / RESOL_H;
+	// }
 }
 
 
 uint32_t hsv_to_rgb(float H, float S, float V) {
-	float r = 0, g = 0, b = 0;
+	double r = 0, g = 0, b = 0;
 	
-	float h = H / 360;
-	float s = S;
-	float v = V;
+	double h = H / 360;
+	double s = S;
+	double v = V;
 	
 	int i = floor(h * 6);
-	float f = h * 6 - i;
-	float p = v * (1 - s);
-	float q = v * (1 - f * s);
-	float t = v * (1 - (1 - f) * s);
+	double f = h * 6 - i;
+	double p = v * (1 - s);
+	double q = v * (1 - f * s);
+	double t = v * (1 - (1 - f) * s);
 	
 	switch (i % 6) {
 		case 0: r = v, g = t, b = p; break;
@@ -186,28 +176,58 @@ uint32_t hsv_to_rgb(float H, float S, float V) {
 	return color.num;
 }
 
-extern float fft_out[FFT_POINTS]; // 0 ~ fft_maxval
+
+void map_test() {
+	static int i = 0;
+	static int j = 0;
+	display_buffer[screen_indices_map[i][j]] = 0x0f0000; // blue
+	if (j == RESOL_W - 1) {
+		j = 0;
+		i++;
+	}
+	else j++;
+
+	if (i == RESOL_H) i = 0, j = 0;
+}
+
+
+void color_test() {
+	static double H = 0.0;
+	for (int i = 0; i < RESOL_H; i++) {
+		for (int j = 0; j < RESOL_W; j++) {
+			display_buffer[screen_indices_map[i][j]] = hsv_to_rgb(H, 0.5, 0.2);
+		}
+	}
+	H += 1;
+	if (H >= 360) H = 0;
+}
+
+extern float fft_out[FFT_POINTS>>1]; // 0 ~ fft_maxval
 extern float fft_maxval;
-extern float phase_out[FFT_POINTS]; // 0 ~ 360
+extern float phase_out[FFT_POINTS>>1]; // 0 ~ 360
+SemaphoreHandle_t fft_data_semaphore = NULL;
 void write_fft2screen_display_buffer() {
+	xSemaphoreTake(fft_data_semaphore, portMAX_DELAY);
 	for (int i = 0; i < RESOL_H; i++) {
 		for (int j = 0; j < RESOL_W; j++) {
 			if ( fft_maxval == 0 || i >= fft_out[j] / fft_maxval * RESOL_H) {
-				display_buffer[screen_indices_map[i][j]] = 0x000000;
+				display_buffer[screen_indices_map[i][j]] = 0x00;
 				// ESP_LOGI("fft", "fft_out[%d] = %f, fft_maxval = %f", j, fft_out[j], fft_maxval);
 			}
 			else {
-				display_buffer[screen_indices_map[i][j]] = hsv_to_rgb(phase_out[j], hight2saturation[i], 0.2);
+				display_buffer[screen_indices_map[i][j]] = hsv_to_rgb(phase_out[j], 0.8, 0.2);
 			}
 		}
 	}
+	xSemaphoreGive(fft_data_semaphore);
 }
+
 
 void display_main(void *arg) {
 	while (1) {
-        // map_test();
-		memset(display_buffer, 0, sizeof(display_buffer)); led_strip_update(); // clear screen
+		// color_test();
         write_fft2screen_display_buffer();
+		
 		led_strip_update();
 		vTaskDelay(pdMS_TO_TICKS(FLASH_RATE_MS));
 	}
@@ -215,6 +235,8 @@ void display_main(void *arg) {
 
 static TaskHandle_t timer_xHandle = NULL;
 void display_start() {
+	fft_data_semaphore = xSemaphoreCreateBinary();
+	xSemaphoreGive(fft_data_semaphore);
 	init_screen_indices_map();
 	initSPIws2812();
 	memset(display_buffer, 0, sizeof(display_buffer)); led_strip_update(); // clear screen
